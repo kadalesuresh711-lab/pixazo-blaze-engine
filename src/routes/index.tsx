@@ -692,9 +692,9 @@ function Index() {
                 const why = lastErr instanceof Error ? lastErr.message : "";
                 const limited = /rate limit|busy|1015|429|too many/i.test(why);
                 setNote(
-                  `${limited ? "Writing service is rate limited" : "Retrying"} — timestamps ${range.from}-${range.to} (try ${attempt + 1})`,
+                  `${limited ? "Agnes temporarily blocked the request — cooling down" : "Retrying"} — timestamps ${range.from}-${range.to} (try ${attempt + 1})`,
                 );
-                await new Promise((r) => setTimeout(r, 5_000 * attempt));
+                await new Promise((r) => setTimeout(r, limited ? 120_000 : 5_000 * attempt));
                 if (cancelRef.current) break;
               }
               try {
