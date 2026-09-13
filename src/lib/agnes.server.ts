@@ -229,8 +229,12 @@ async function callAgnes(user: string, opts: ChatOptions): Promise<string> {
           // nothing drawn.
           const rateLimited = res.status === 429 || /1015/.test(body);
           const retryAfter = Number(res.headers.get("retry-after") ?? 0);
-          const base = rateLimited ? 8_000 * (attempt + 1) : 3_000 * (attempt + 1);
-          await backoff(retryAfter > 0 ? retryAfter * 1000 + 500 : base);
+          // Exponential, not linear: a 1015 block deepens when it is retried
+          // too soon, which is what made long scripts fail in ranges.
+          const base = rateLimited
+            ? Math.min(MAX_RETRY_DELAY_MS, 6_000 * 2 ** attempt)
+            : 3_000 * (attempt + 1);
+          await backoff(retryAfter > 0 ? Math.max(retryAfter * 1000 + 500, base) : base);
           continue;
         }
 
