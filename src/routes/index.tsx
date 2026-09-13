@@ -677,17 +677,22 @@ function Index() {
           targets.forEach((s) => record(s.index, { status: "prompting" }));
           try {
             const wanted = targets.map((s) => s.index + 1);
-            // A whole range must never be abandoned because the writing
-            // service was momentarily rate limited: retry the RANGE (with a
-            // pause) instead of dumping fifteen panels into the slow
+            // A whole batch must never be abandoned because the writing
+            // service was momentarily rate limited: retry the BATCH (with a
+            // pause) instead of dumping its timestamps into the slow
             // one-line-at-a-time repair, which is what made a long script
             // take days.
             let res: { prompts: string[] } | undefined;
             let lastErr: unknown;
             for (let attempt = 0; attempt < 4 && !cancelRef.current; attempt++) {
               if (attempt > 0) {
+                // Say what actually happened. The old text claimed the writer
+                // was busy for EVERY failure, so an idle site still reported
+                // "Writer busy" on an unrelated hiccup.
+                const why = lastErr instanceof Error ? lastErr.message : "";
+                const limited = /rate limit|busy|1015|429|too many/i.test(why);
                 setNote(
-                  `Writer busy — retrying lines ${range.from}-${range.to} (try ${attempt + 1})`,
+                  `${limited ? "Writing service is rate limited" : "Retrying"} — timestamps ${range.from}-${range.to} (try ${attempt + 1})`,
                 );
                 await new Promise((r) => setTimeout(r, 5_000 * attempt));
                 if (cancelRef.current) break;
