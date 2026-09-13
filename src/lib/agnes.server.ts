@@ -249,7 +249,7 @@ async function callAgnes(user: string, opts: ChatOptions): Promise<string> {
 
     throw new Error(`Agnes request failed: ${lastErr}`);
   } finally {
-    release();
+    release(token);
   }
 }
 
