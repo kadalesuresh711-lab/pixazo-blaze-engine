@@ -99,14 +99,14 @@ const SAMPLE = `(0:00)Henan की कहानी असुरा का उद
 
 /**
  * TIMESTAMPS per prompt batch — the batch unit is the timestamp, not the raw
- * line count: 30 consecutive timestamps of the script go out as one pass.
+ * line count: 20 consecutive timestamps of the script go out as one pass.
  *
  * The model receives broad surrounding context but writes only this group at a
- * time. Thirty neighbouring timestamps stay inside one continuous scene, and
- * halve the number of upstream calls a long script needs, which is what kept
- * tripping the provider's rate limit.
+ * time. Twenty neighbouring timestamps stay inside one continuous scene, while
+ * keeping each upstream request smaller so the provider's burst limit is far
+ * less likely to trip.
  */
-const PROMPT_RANGE = 30;
+const PROMPT_RANGE = 20;
 
 /**
  * Image pipeline shape: TEN Pixazo keys, THREE images per key at a time.
