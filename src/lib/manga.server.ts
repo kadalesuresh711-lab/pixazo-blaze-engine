@@ -645,16 +645,23 @@ export async function writePrompts(
   }
 
 
-  // Duplicate guard: two timestamps must never share one written prompt, or
-  // one line's picture ends up standing in for another moment entirely.
+  // Duplicate diagnostic only. Prompts commonly share a long style/character
+  // prefix while describing different actions later in the text. The previous
+  // guard compared only the first 160 characters and deleted those valid
+  // timestamp-mapped prompts after the repair pass, leaving panels with no
+  // prompt and therefore no image. Timestamp echoes/numbering above are the
+  // authoritative mapping; never erase a mapped prompt here.
   const seen = new Map<string, number>();
   for (const n of wanted) {
     const own = byNumber.get(n);
     if (!own) continue;
-    const fingerprint = own.trim().toLowerCase().slice(0, 160);
+    const fingerprint = own.trim().toLowerCase().replace(/\s+/g, " ");
     const first = seen.get(fingerprint);
-    if (first !== undefined && first !== n) byNumber.delete(n);
-    else seen.set(fingerprint, n);
+    if (first !== undefined && first !== n) {
+      console.warn(`writePrompts: lines ${first} and ${n} returned identical prompts; keeping both timestamp slots`);
+    } else {
+      seen.set(fingerprint, n);
+    }
   }
 
   // ONE ENTRY PER REQUESTED LINE, ALWAYS. The array is positional: the caller
