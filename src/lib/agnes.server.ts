@@ -30,6 +30,13 @@ const MAX_OUT = 60_000;
 /** Minimum gap between two request STARTS (spaces the account's rate limit). */
 const MIN_GAP_MS = 1_500;
 /**
+ * Agnes' Cloudflare edge also limits a burst that begins immediately after a
+ * long streamed response finishes. Space requests from the previous FINISH,
+ * not only its start, so sequential 30-timestamp batches do not look like a
+ * burst even though this process never overlaps them.
+ */
+const MIN_COMPLETION_GAP_MS = 20_000;
+/**
  * Exactly ONE text request may be in flight per server process. The provider
  * answers Cloudflare error 1015 as soon as calls overlap, and a rate-limited
  * account then hands back multi-minute waits that stall a whole run.
@@ -42,7 +49,7 @@ const MAX_QUEUE_WAIT_MS = 420_000;
  * Retry-After header. Long enough for a real 1015 block in front of the
  * provider to clear, short enough that a run never looks frozen for minutes.
  */
-const MAX_RETRY_DELAY_MS = 45_000;
+const MAX_RETRY_DELAY_MS = 180_000;
 /**
  * A held slot is only ever real for as long as one upstream attempt can last.
  * Anything older is a leak (a handler the platform tore down mid-request, a
@@ -53,6 +60,7 @@ const MAX_RETRY_DELAY_MS = 45_000;
 const SLOT_STALE_MS = 11 * 60_000;
 
 let lastUsed = 0;
+let lastCompleted = 0;
 /** Start time of every slot currently believed to be in flight. */
 let slots: number[] = [];
 const waiting: (() => void)[] = [];
@@ -116,8 +124,12 @@ async function acquire(): Promise<number> {
   assertActive();
   const token = Date.now();
   slots.push(token);
-  const gap = MIN_GAP_MS - (Date.now() - lastUsed);
+  const gap = Math.max(
+    MIN_GAP_MS - (Date.now() - lastUsed),
+    MIN_COMPLETION_GAP_MS - (Date.now() - lastCompleted),
+  );
   if (gap > 0) await sleep(gap);
+  assertActive();
   lastUsed = Date.now();
   return token;
 }
@@ -125,6 +137,7 @@ async function acquire(): Promise<number> {
 function release(token: number): void {
   const i = slots.indexOf(token);
   if (i >= 0) slots.splice(i, 1);
+  lastCompleted = Date.now();
   waiting.shift()?.();
 }
 
@@ -222,19 +235,17 @@ async function callAgnes(user: string, opts: ChatOptions): Promise<string> {
 
 
         if (busy(res.status, body)) {
-          // Retry-After is CLAMPED: a rate-limited account (Cloudflare 1015)
-          // reports multi-minute waits, and honouring them froze the run.
-          // A 1015 needs a real pause though — retrying after a second only
-          // deepens the block, and a whole range of panels then failed with
-          // nothing drawn.
+          // 1015 is an edge/IP burst block, independent of the account's shown
+          // quota. Retrying every 45 seconds kept extending that block. Give it
+          // a real bounded cooldown and never sleep after the final attempt.
           const rateLimited = res.status === 429 || /1015/.test(body);
           const retryAfter = Number(res.headers.get("retry-after") ?? 0);
-          // Exponential, not linear: a 1015 block deepens when it is retried
-          // too soon, which is what made long scripts fail in ranges.
           const base = rateLimited
-            ? Math.min(MAX_RETRY_DELAY_MS, 6_000 * 2 ** attempt)
+            ? Math.min(MAX_RETRY_DELAY_MS, 60_000 * 2 ** attempt)
             : 3_000 * (attempt + 1);
-          await backoff(retryAfter > 0 ? Math.max(retryAfter * 1000 + 500, base) : base);
+          if (attempt + 1 < attempts) {
+            await backoff(retryAfter > 0 ? Math.max(retryAfter * 1000 + 500, base) : base);
+          }
           continue;
         }
 

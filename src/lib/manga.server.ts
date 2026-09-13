@@ -323,10 +323,10 @@ function representativeScript(script: string, limit: number): string {
  * script still goes in; above it, the request carries the story opening plus a
  * generous window around the lines being drawn.
  */
-const CONTEXT_CHARS = 72_000;
+const CONTEXT_CHARS = 28_000;
 /** Lines of story kept before/after the batch when the script is long. */
-const CONTEXT_BEFORE = 400;
-const CONTEXT_AFTER = 200;
+const CONTEXT_BEFORE = 120;
+const CONTEXT_AFTER = 60;
 
 /** Numbers the WHOLE script, 1-based, exactly as the model must answer it. */
 function numberScript(all: Segment[]): string {
