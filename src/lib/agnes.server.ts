@@ -168,7 +168,7 @@ async function callAgnes(user: string, opts: ChatOptions): Promise<string> {
       // A killed run never makes another upstream request.
       assertActive();
       console.log(
-        `[agnes] request attempt ${attempt + 1}/${attempts} model=${model()} inChars=${user.length} maxOut=${Math.min(MAX_OUT, opts.maxOutputTokens ?? 16_000)} inFlight=${inFlight}`,
+        `[agnes] request attempt ${attempt + 1}/${attempts} model=${model()} inChars=${user.length} maxOut=${Math.min(MAX_OUT, opts.maxOutputTokens ?? 16_000)} inFlight=${slots.length}`,
       );
       const gate = killableSignal(opts.timeoutMs ?? 600_000);
       try {
