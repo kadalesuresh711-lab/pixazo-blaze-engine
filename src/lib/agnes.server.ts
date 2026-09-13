@@ -28,7 +28,7 @@ function apiKey(): string {
 /** Largest answer to ask for. */
 const MAX_OUT = 60_000;
 /** Minimum gap between two request STARTS (spaces the account's rate limit). */
-const MIN_GAP_MS = 1_200;
+const MIN_GAP_MS = 1_500;
 /**
  * Exactly ONE text request may be in flight per server process. The provider
  * answers Cloudflare error 1015 as soon as calls overlap, and a rate-limited
@@ -39,16 +39,36 @@ const MAX_IN_FLIGHT = 1;
 const MAX_QUEUE_WAIT_MS = 420_000;
 /**
  * No retry ever waits longer than this, whatever the provider asks for in a
- * Retry-After header. A provider-supplied multi-minute wait is what kept one
- * prompt request open for ~15 minutes while heartbeats made the page look busy.
+ * Retry-After header. Long enough for a real 1015 block in front of the
+ * provider to clear, short enough that a run never looks frozen for minutes.
  */
-const MAX_RETRY_DELAY_MS = 20_000;
+const MAX_RETRY_DELAY_MS = 45_000;
+/**
+ * A held slot is only ever real for as long as one upstream attempt can last.
+ * Anything older is a leak (a handler the platform tore down mid-request, a
+ * dropped page whose work was never unwound) and used to make a completely idle
+ * server keep reporting "writer busy" to the next visitor. Stale slots are
+ * reclaimed instead of blocking the queue forever.
+ */
+const SLOT_STALE_MS = 11 * 60_000;
 
 let lastUsed = 0;
-let inFlight = 0;
+/** Start time of every slot currently believed to be in flight. */
+let slots: number[] = [];
 const waiting: (() => void)[] = [];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Drops leaked slots and returns how many are genuinely in flight. */
+function activeSlots(): number {
+  const cutoff = Date.now() - SLOT_STALE_MS;
+  const before = slots.length;
+  slots = slots.filter((at) => at > cutoff);
+  if (slots.length !== before) {
+    console.warn(`[agnes] reclaimed ${before - slots.length} stale text slot(s)`);
+  }
+  return slots.length;
+}
 
 /** Waits in short slices, giving up the moment the run is killed. */
 async function backoff(ms: number): Promise<void> {
@@ -67,31 +87,44 @@ async function backoff(ms: number): Promise<void> {
  * in time fails fast instead of making the page look stuck forever, and queued
  * work stops immediately when the run is killed.
  */
-async function acquire(): Promise<void> {
-  if (inFlight >= MAX_IN_FLIGHT) {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
+async function acquire(): Promise<number> {
+  while (activeSlots() >= MAX_IN_FLIGHT) {
+    // Wake on release, and also on a short poll so a leaked slot can never
+    // hold the queue: activeSlots() retires it on the next loop.
+    const waited = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (released: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(poll);
+        clearTimeout(giveUp);
         const i = waiting.indexOf(wake);
         if (i >= 0) waiting.splice(i, 1);
-        reject(new Error("Text engine busy: too many requests at once, please retry"));
-      }, MAX_QUEUE_WAIT_MS);
-      const wake = () => {
-        clearTimeout(timer);
-        resolve();
+        resolve(released);
       };
+      const wake = () => finish(true);
+      const poll = setTimeout(() => finish(true), 1_000);
+      const giveUp = setTimeout(() => finish(false), MAX_QUEUE_WAIT_MS);
       waiting.push(wake);
     });
+    if (!waited) {
+      throw new Error("The writing service is still finishing an earlier request — retrying");
+    }
+    // Whatever happened while queueing, a killed run never takes the slot.
+    assertActive();
   }
-  // Whatever happened while queueing, a killed run never takes the slot.
   assertActive();
-  inFlight++;
+  const token = Date.now();
+  slots.push(token);
   const gap = MIN_GAP_MS - (Date.now() - lastUsed);
   if (gap > 0) await sleep(gap);
   lastUsed = Date.now();
+  return token;
 }
 
-function release(): void {
-  inFlight = Math.max(0, inFlight - 1);
+function release(token: number): void {
+  const i = slots.indexOf(token);
+  if (i >= 0) slots.splice(i, 1);
   waiting.shift()?.();
 }
 
