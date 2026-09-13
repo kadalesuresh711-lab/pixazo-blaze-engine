@@ -137,10 +137,3 @@ export async function loadRun<T>(key: string): Promise<SavedRun<T> | null> {
     return null;
   }
 }
-
-if (import.meta.env.DEV && typeof window !== 'undefined') {
-  setTimeout(async () => {
-    const run = await loadLatestRun();
-    console.log('REVIEW_SAVED_RUN=' + JSON.stringify(run));
-  }, 1500);
-}
