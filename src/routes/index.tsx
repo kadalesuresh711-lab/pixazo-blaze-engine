@@ -600,7 +600,7 @@ function Index() {
       // use a heartbeat stream, so the published connection stays active while
       // Agnes writes each full 120-line answer.
       const needPrompts = pending.filter((s) => !hasPrompt(s.prompt));
-      // Batches follow the TIMESTAMPS themselves: PROMPT_RANGE (30) consecutive
+      // Batches follow the TIMESTAMPS themselves: PROMPT_RANGE (20) consecutive
       // timestamps per pass, never scattered line numbers spanning a wide range.
       // A group of neighbouring timestamps keeps the writer inside one
       // continuous scene, which keeps each picture faithful to its own moment.
